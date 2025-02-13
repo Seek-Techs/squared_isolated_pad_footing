@@ -1,0 +1,6 @@
+# .gitignore
+data/processed/*
+  models/*
+  reports/figures/*
+  .Rhistory
+.RData
