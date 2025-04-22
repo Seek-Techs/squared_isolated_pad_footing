@@ -33,6 +33,7 @@ with tabs[0]:
         <div style="text-align: justify;">
             This application performs the structural design of a square pad footing
             supporting a centrally loaded square column based on Eurocode 2 provisions.
+
             Enter your input parameters in the sidebar to get started.
         </div>
         """,
