@@ -1,0 +1,77 @@
+.start-design-button-container {
+    display: flex;
+    justify-content: center;
+    margin-top: 20px;
+    margin-bottom: 20px;
+  }
+  
+  .start-design-button {
+    background-color: #4CAF50;
+    /* Green */
+    border: none;
+    color: white;
+    padding: 15px 32px;
+    text-align: center;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 10px;
+  }
+  
+  .start-design-button:hover {
+    background-color: #367c39;
+  }
+  
+  .benefit-panel {
+    text-align: center;
+    font-weight: bold;
+    margin-bottom: 10px;
+  }
+  
+  .footer {
+    text-align: center;
+    color: gray;
+    margin-top: 50px;
+  }
+  
+  .benefit-panel { /* Style for the benefit panels */
+    background-color: #e8f0fa; /* Light blue */
+    padding: 15px;
+    border-radius: 5px;
+    margin-bottom: 10px;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+#start_design_button {
+  background-color: #4CAF50;
+  color: white;
+  padding: 15px 30px;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 18px;
+  margin-top: 20px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  transition: background-color 0.3s ease, box-shadow 0.3s ease;
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+  width: fit-content;
+  text-align: center; /* Add this line */
+}
+
+#start_design_button:hover {
+  background-color: #388E3C;
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+}
+
+#start_design_button:active {
+  background-color: #2B7A2E;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+
+
+  
