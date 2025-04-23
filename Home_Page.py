@@ -66,7 +66,7 @@ with col2:
     st.markdown("Click the button below to start designing your pad footing!")
 
     if st.button("Launch Design Tool"):
-        st.switch_page("pages/streamlit_app.py")
+        st.switch_page("pages/Isolated_pad_footing.py")
 # --- Footer ---
 st.markdown(
     """<br><br><br><br>
