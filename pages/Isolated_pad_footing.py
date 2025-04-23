@@ -3,6 +3,14 @@ import streamlit as st
 import plotly.graph_objects as go
 import numpy as np
 import math
+import io  # Import the io module
+import datetime # Import datetime
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.units import inch
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import Paragraph, Spacer, SimpleDocTemplate, Table, TableStyle
+from reportlab.lib import colors
 
 # --- Page configuration ---
 st.set_page_config(page_title="Square Pad Footing Design", layout="wide")
@@ -41,7 +49,7 @@ if st.button("Go to Home", key="home_button", on_click=lambda: st.session_state.
     st.switch_page("Home.py")
 
 # --- Tabs setup ---
-tabs = st.tabs(["Project Overview", "Punching Shear Check", "Moment & Reinforcement", "2D Plan View", "3D Reinforcement View"])
+tabs = st.tabs(["Project Overview", "Punching Shear Check", "Moment & Reinforcement", "2D Plan View", "3D Reinforcement View", "Download Report"])
 
 # ----------------------------
 # 1. Project Overview Tab
@@ -142,43 +150,47 @@ with tabs[2]:
     overhang_m = (provided_footing_side_m - col_width_m) / 2  # m
     Mx_kNm = 0.5 * net_upward_pressure * (overhang_m ** 2)  # kNm/m (Moment per unit width)
     My_kNm = Mx_kNm  # Same due to square footing symmetry
-    
+
     st.write(f"Provided Footing Size: {provided_footing_side_mm:.0f} mm × {provided_footing_side_mm:.0f} mm")
-    st.write(f"Factored moment (Mx = My): {My_kNm:.2f} kNm/m")  # Corrected unit display
+    st.write(f"Factored moment (Mx = My): {My_kNm:.2f} kNm/m")
+
     # Effective depth should ideally be calculated based on footing depth, cover, and bar diameter
-    # Using the value from Punching Shear for consistency, but consider a separate input or calculation if needed
+    # Using the value from Punching Shear for consistency
     effective_depth_mm = st.number_input("Effective Depth (d) for Moment (mm)", value=effective_depth, min_value=50.0)
-    fy_Nmm2 = fy  # Using fy from the sidebar
-    # Eurocode 2 calculation for required steel area
-    fcd_Nmm2 = 0.85 * fcu / 1.5  # Design compressive strength of concrete (using fcu as fck approx.)
-    K = My_kNm * 1e6 / (fcd_Nmm2 * 1000 * effective_depth_mm ** 2)  # b = 1000 mm for per meter width
-    K_bal = 0.167  # Approximate balanced K for concrete grade around C30 (EC2) - ADJUST IF NEEDED FOR YOUR fcu
+    fy_Nmm2 = fy
+    fcd_Nmm2 = 0.85 * fcu / 1.5
+    K = My_kNm * 1e6 / (fcd_Nmm2 * 1000 * effective_depth_mm ** 2)
+    K_bal = 0.167
     if K > K_bal:
-        st.warning("Section requires compression reinforcement or increased depth based on simplified K_bal.")
-    la = effective_depth_mm * (0.5 + math.sqrt(0.25 - K / 1.134))  # Lever arm (z in EC2)
+        st.warning("Section requires compression reinforcement or increased depth.")
+    la = effective_depth_mm * (0.5 + math.sqrt(0.25 - K / 1.134))
     if la > 0.95 * effective_depth_mm:
         la = 0.95 * effective_depth_mm
-    As_required = (My_kNm * 1e6) / (0.87 * fy_Nmm2 * la)  # mm²/m (Required steel area per meter width)
+    As_required = (My_kNm * 1e6) / (0.87 * fy_Nmm2 * la)
     st.write(f"Required reinforcement area (Ast): {As_required:.2f} mm²/m")
-    # Reinforcement Suggestion Logic with Preferred Spacings
-    bar_options = [12, 16, 20]
+
+    # User selects ONE bar diameter
+    available_bar_diameters = [10, 12, 16, 20, 25, 32]  # Add more as needed
+    selected_bar_diameter = st.selectbox("Select Bar Diameter (mm)", available_bar_diameters) # corrected line
     max_spacing = 300  # mm
     min_spacing = 50  # mm
-    suitable_options = []
     preferred_spacings = [100, 125, 150, 175, 200, 225, 250, 300]
-    for bar_dia in bar_options:
-        area_per_bar = (math.pi * bar_dia ** 2) / 4  # mm²
-        for n_bars in range(math.ceil(As_required / area_per_bar), 21):  # Start with a reasonable lower bound for n_bars
-            spacing = 1000 / n_bars  # mm
-            Ast_provided_per_meter = n_bars * area_per_bar
-            if min_spacing <= spacing <= max_spacing and Ast_provided_per_meter >= As_required * 0.95:  # Allow a small under-provision
-                suitable_options.append({
-                    'bar_dia': bar_dia,
-                    'area_per_bar': round(area_per_bar, 2),
-                    'no_bars': n_bars,
-                    'Ast_provided_per_meter': round(Ast_provided_per_meter, 2),
-                    'spacing': round(spacing, 2)
-                })
+
+    area_per_bar = (math.pi * selected_bar_diameter ** 2) / 4  # mm²
+
+    suitable_options = [] #important
+    for n_bars in range(math.ceil(As_required / area_per_bar), 21):  # Iterate through a reasonable range of bar numbers
+        spacing = 1000 / n_bars
+        Ast_provided_per_meter = n_bars * area_per_bar
+        if min_spacing <= spacing <= max_spacing and Ast_provided_per_meter >= 0.95 * As_required:
+            suitable_options.append({
+                'bar_dia': selected_bar_diameter,
+                'area_per_bar': round(area_per_bar, 2),
+                'no_bars': n_bars,
+                'Ast_provided_per_meter': round(Ast_provided_per_meter, 2),
+                'spacing': round(spacing, 2)
+            })
+
     if suitable_options:
         def get_spacing_preference_score(option):
             min_diff = float('inf')
@@ -187,8 +199,9 @@ with tabs[2]:
                 if diff < min_diff:
                     min_diff = diff
             return min_diff
-        best_option = min(suitable_options, key=lambda x: (
-            get_spacing_preference_score(x), abs(x['Ast_provided_per_meter'] - As_required)))
+
+        best_option = min(suitable_options, key=lambda x: (get_spacing_preference_score(x), abs(x['Ast_provided_per_meter'] - As_required)))
+
         st.subheader("Reinforcement Suggestion:")
         st.write(f"Bar Diameter: T{best_option['bar_dia']} mm")
         st.write(f"Spacing: {best_option['spacing']} mm c/c")
@@ -281,7 +294,7 @@ with tabs[4]:
            center_3d - col_half_3d, center_3d + col_half_3d, center_3d + col_half_3d, center_3d - col_half_3d],
         y=[center_3d - col_half_3d, center_3d - col_half_3d, center_3d + col_half_3d, center_3d + col_half_3d,
            center_3d - col_half_3d, center_3d - col_half_3d, center_3d + col_half_3d, center_3d + col_half_3d],
-        z=[0, 0, 0, 0, 300, 300, 300, 300],
+        z=[0, 0, 0, 0, footing_depth, footing_depth, footing_depth, footing_depth],
         color='blue',
         opacity=0.5,
         name='Column',
@@ -290,9 +303,9 @@ with tabs[4]:
     fig3d.update_layout(
         title="3D Reinforcement View",
         scene=dict(
-            xaxis=dict(title='X (mm)', range=[0, provided_side_mm_3d]),  # Added range for better view
-            yaxis=dict(title='Y (mm)', range=[0, provided_side_mm_3d]),
-            zaxis=dict(title='Z (mm)', range=[0, 300]),  # Added range for Z
+            xaxis=dict(title=f'{provided_side_mm_3d} (mm)', range=[0, provided_side_mm_3d]),  # Added range for better view
+            yaxis=dict(title=f'{provided_side_mm_3d} (mm)', range=[0, provided_side_mm_3d]),
+            zaxis=dict(title=f'{footing_depth} (mm)', range=[0, footing_depth]),  # Added range for Z
             aspectratio=dict(x=1, y=1, z=0.3),
             camera=dict(
                 eye=dict(x=1.2, y=1.2, z=0.8)  # Adjust camera position for better view
@@ -301,3 +314,193 @@ with tabs[4]:
         showlegend=True  # Show legend to distinguish X and Y bars
     )
     st.plotly_chart(fig3d, use_container_width=True)
+# # --- Add a download button for the report ---
+# report_filename = "footing_design_report.txt"  # Name of the report file
+
+# # Create the report content as a string
+# report_content = f"""
+# Square Pad Footing Design Report
+
+# 1. Project Overview
+# --------------------
+# Total service load: {total_load:.2f} kN
+# Factored load: {factored_load:.2f} kN
+# Safe bearing capacity: {safe_bearing:.1f} kN/m²
+# Calculated Footing Size (approx): {footing_side_mm_calculated:.0f} mm × {footing_side_mm_calculated:.0f} mm
+
+# 2. Punching Shear Check
+# ----------------------
+# Provided Footing Size: {provided_footing_side_mm:.0f} mm × {provided_footing_side_mm:.0f} mm
+# Effective Depth (d): {effective_depth} mm
+# Critical Perimeter (Pcr): {Pcr:.2f} mm
+# Area within critical perimeter (Acr): {Acr:.4f} m²
+# Punching shear stress (ved): {v_ed:.2f} N/mm²
+# Punching shear capacity (vrdc): {v_rd_c:.2f} N/mm²
+# Punching Shear Stress (Vpunch): {Vpunch:.3f} N/mm²
+# Punching shear check: {'PASSED' if v_ed < v_rd_c else 'FAILED'}
+
+# 3. Moment and Reinforcement Design
+# -----------------------------------
+# Provided Footing Size: {provided_footing_side_mm:.0f} mm × {provided_footing_side_mm:.0f} mm
+# Factored moment (Mx = My): {My_kNm:.2f} kNm/m
+# Required reinforcement area (Ast): {As_required:.2f} mm²/m
+
+# Reinforcement Suggestion:
+# Bar Diameter: {best_option['bar_dia']} mm
+# Spacing: {best_option['spacing']} mm c/c
+# Provided Ast: {best_option['Ast_provided_per_meter']} mm²/m
+# Provide T{best_option['bar_dia']} mm bars @ {best_option['spacing']} mm c/c in both directions
+# """
+
+# # Create a BytesIO object to hold the report content
+# report_buffer = io.BytesIO(report_content.encode())
+
+# # Add a download button
+# st.download_button(
+#     label="Download Design Report",
+#     data=report_buffer,
+#     file_name=report_filename,
+#     mime="text/plain",  # Set the MIME type for a plain text file
+#     help="Download a text file containing the design report.",
+# )
+
+# ----------------------------
+# 6. Download Report Tab
+# ----------------------------
+with tabs[5]:
+    st.header("Download Report")
+    st.write("Generate a PDF report of the footing design calculations.")
+
+    if st.button("Generate Report"):
+        # Create a BytesIO buffer to hold the PDF data
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        styles = getSampleStyleSheet()
+        Story = []
+
+        # Title and Metadata
+        title_style = styles['Title']
+        title_style.alignment = 1  # Center
+        Story.append(Paragraph("Square Pad Footing Design Report", title_style))
+        Story.append(Spacer(1, 0.2 * inch))
+        date_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        Story.append(Paragraph(f"Date: {date_str}", styles['Normal']))
+        Story.append(Spacer(1, 0.2 * inch))
+
+        # 1. Project Overview
+        Story.append(Paragraph("1. Project Overview", styles['h1']))
+        Story.append(Spacer(1, 0.1 * inch))
+        data = [
+            ["Parameter", "Value"],
+            ["Total service load (kN)", f"{total_load:.2f}"],
+            ["Factored load (kN)", f"{factored_load:.2f}"],
+            ["Safe bearing capacity (kN/m²)", f"{safe_bearing:.1f}"],
+            ["Provided Footing Size (mm)", f"{provided_footing_side_mm:.0f} x {provided_footing_side_mm:.0f}"],
+        ]
+        table = Table(data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (1, 0), 12),
+            ('BACKGROUND', (0, 1), (1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ]))
+        Story.append(table)
+        Story.append(Spacer(1, 0.2 * inch))
+
+        # 2. Punching Shear Check
+        Story.append(Paragraph("2. Punching Shear Check", styles['h1']))
+        Story.append(Spacer(1, 0.1 * inch))
+
+        # Calculate check results beforehand
+        punching_shear_check = "PASSED" if v_ed < v_rd_c else "FAILED"
+        safe_bearing_check = max_soil_pressure <= safe_bearing  # Assuming max_soil_pressure is defined
+
+        data = [
+            ["Parameter", "Value"],
+            ["Effective Depth (d) (mm)", f"{effective_depth}"],
+            ["Critical Perimeter (Pcr) (mm)", f"{Pcr:.2f}"],
+            ["Area within critical perimeter (Acr) (m²)", f"{Acr:.4f}"],
+            ["Punching shear stress (ved) (N/mm²)", f"{v_ed:.2f}"],
+            ["Punching shear capacity (vrdc) (N/mm²)", f"{v_rd_c:.2f}"],
+            ["Punching Shear Stress (Vpunch) (N/mm²)", f"{Vpunch:.3f}"],
+            ["Punching Shear Check", punching_shear_check],
+            ["Safe Bearing Check", "PASSED" if safe_bearing_check else "FAILED"],  #added safe bearing check
+        ]
+
+        table = Table(data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (1, 0), 12),
+            ('BACKGROUND', (0, 1), (1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ('TEXTCOLOR', (1, 7), (1, 7), colors.green if v_ed < v_rd_c else colors.red), # Changed index to 7
+            ('TEXTCOLOR', (1, 8), (1, 8), colors.green if safe_bearing_check else colors.red),  # Added color for safe bearing check
+        ]))
+        Story.append(table)
+        Story.append(Spacer(1, 0.2 * inch))
+
+        # 3. Moment & Reinforcement Design
+        Story.append(Paragraph("3. Moment & Reinforcement Design", styles['h1']))
+        Story.append(Spacer(1, 0.1 * inch))
+        data = [
+            ["Parameter", "Value"],
+            ["Factored moment (Mx = My) (kNm/m)", f"{My_kNm:.2f}"],
+            ["Required reinforcement area (Ast) (mm²/m)", f"{As_required:.2f}"]
+        ]
+        table = Table(data)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (1, 0), 'CENTER'),
+            ('FONTNAME', (0, 0), (1, 0), 'Helvetica-Bold'),
+            ('BOTTOMPADDING', (0, 0), (1, 0), 12),
+            ('BACKGROUND', (0, 1), (1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ]))
+        Story.append(table)
+        Story.append(Spacer(1, 0.1 * inch))
+
+        if 'best_option' in locals():
+            Story.append(Paragraph("Reinforcement Suggestion:", styles['h2']))
+            data = [
+                ["Parameter", "Value"],
+                ["Bar Diameter (mm)", f"T{best_option['bar_dia']}"],
+                ["Spacing (mm c/c)", f"{best_option['spacing']}"],
+                ["Provided Ast (mm²/m)", f"{best_option['Ast_provided_per_meter']}"]
+            ]
+            table = Table(data)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (1, 0), colors.lightgrey),
+                ('TEXTCOLOR', (0, 0), (1, 0), colors.black),
+                ('ALIGN', (0, 0), (1, 0),'CENTER'),
+                ('FONTNAME', (0, 0), (1, 0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0, 0), (1, 0), 12),
+                ('BACKGROUND', (0, 1), (1, -1), colors.white),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            ]))
+            Story.append(table)
+        else:
+            Story.append(Paragraph("No suitable reinforcement option found.", styles['Normal']))
+        Story.append(Spacer(1, 0.2 * inch))
+
+        Story.append(Paragraph("4. 2D Plan View: (See application for plot)", styles['h1']))
+        Story.append(Spacer(1, 0.2 * inch))
+        Story.append(Paragraph("5. 3D Reinforcement View: (See application for 3D plot)", styles['h1']))
+
+        doc.build(Story)
+        buffer.seek(0)
+
+        # Download button
+        st.download_button(
+            label="Download PDF Report",
+            data=buffer,
+            file_name="footing_design_report.pdf",
+            mime="application/pdf",
+            help="Download a PDF report of the footing design calculations.",
+        )
